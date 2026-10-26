@@ -14,6 +14,8 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
 	"github.com/bootdotdev/learn-web-security/internal/templates"
+
+	"github.com/bootdotdev/learn-web-security/internal/auth/passwords"
 )
 
 type pageView struct {
@@ -82,6 +84,19 @@ func (handler *Handler) UpdateEmail(responseWriter http.ResponseWriter, request 
 	if !ok || !handler.verifyCSRF(responseWriter, request, current.Session.CSRFToken) {
 		return
 	}
+	// verify password before changing email
+	password, pwErr := httpx.FormValue(request, "currentPassword")
+	if pwErr != nil {
+		handler.errorPage(responseWriter, http.StatusBadRequest, "Invalid Request", "The submitted form is invalid.")
+		return
+	}
+	if password == "" || !passwords.Verify(password, current.User.PasswordHash) {
+		if err := handler.renderPage(responseWriter, http.StatusForbidden, current, "Re-enter your current password to change your email."); err != nil {
+			handler.internalError(responseWriter, request, err)
+		}
+		return
+	}
+	// password is given and valid, change email
 	email, emailErr := httpx.FormValue(request, "email")
 	if emailErr != nil {
 		handler.errorPage(responseWriter, http.StatusBadRequest, "Invalid Request", "The submitted form is invalid.")
