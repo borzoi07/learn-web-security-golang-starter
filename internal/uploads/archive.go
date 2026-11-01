@@ -71,6 +71,13 @@ func ExtractTaxDocumentArchive(encryptionKeyring Keyring, contents []byte, extra
 		if isIgnoredArchiveEntry(entry.Name) {
 			continue
 		}
+		// validate all entries before extracting any of them
+		if filepath.IsAbs(entry.Name) ||
+			strings.Contains(entry.Name, "\\") ||
+			!isInsideDirectory(importDirectory, entryDestination) ||
+			entry.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return ExtractedTaxDocumentArchive{}, &ArchiveImportError{Message: "Archive contains an unsafe entry path.", StatusCode: 400}
+		}
 		if strings.HasSuffix(entry.Name, "/") {
 			plannedEntries = append(plannedEntries, plannedArchiveEntry{directory: true, destination: entryDestination})
 			continue
@@ -155,6 +162,12 @@ func isIgnoredArchiveEntry(entryName string) bool {
 		strings.HasPrefix(baseName, "._") ||
 		baseName == "thumbs.db" ||
 		baseName == "desktop.ini"
+}
+
+func isInsideDirectory(directory, candidatePath string) bool {
+	relativePath, err := filepath.Rel(directory, candidatePath)
+
+	return err == nil && relativePath != "." && relativePath != ".." && !strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
 }
 
 func DiscardExtractedTaxDocumentArchive(archive ExtractedTaxDocumentArchive) error {
