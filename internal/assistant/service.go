@@ -52,7 +52,7 @@ func (service *Service) BuildRequest(authenticatedUserID int64, userMessage stri
 			},
 			{Role: "user", Content: userMessage},
 		},
-		Tools: service.createTools(),
+		Tools: service.createTools(authenticatedUserID),
 	}
 }
 
@@ -65,35 +65,33 @@ func RunSimulatedAssistant(ctx context.Context, request Request) (string, error)
 	if !found {
 		return "Ask me about an order using its order number.", nil
 	}
-	userID, _ := requestedUserID(userMessage)
 
 	if refundPattern.MatchString(userMessage) {
 		return "I cannot issue refunds. Please contact support.", nil
 	}
 	for _, tool := range request.Tools {
 		if tool.Name == "get_order_status" && tool.Execute != nil {
-			return tool.Execute(ctx, map[string]any{"orderId": orderID, "userId": userID})
+			return tool.Execute(ctx, map[string]any{"orderId": orderID})
 		}
 	}
 	return "Order status is unavailable.", nil
 }
 
-func (service *Service) createTools() []Tool {
+func (service *Service) createTools(authenticatedUserId int64) []Tool {
 	return []Tool{
 		{
 			Name:        "get_order_status",
 			Description: "Look up an order status using an order ID.",
 			Execute: func(ctx context.Context, input map[string]any) (string, error) {
 				orderID, valid := input["orderId"].(int64)
-				userID, validUser := input["userId"].(int64)
-				if !valid || !validUser || orderID <= 0 || userID <= 0 {
+				if !valid || orderID <= 0 {
 					return "Order not found.", nil
 				}
 				order, found, err := service.orderStore.FindByID(ctx, orderID)
 				if err != nil {
 					return "", err
 				}
-				if !found || order.UserID != userID {
+				if !found || order.UserID != authenticatedUserId {
 					return "Order not found.", nil
 				}
 				return "Order #" + strconv.FormatInt(order.ID, 10) + " is " + order.Status + ".", nil
