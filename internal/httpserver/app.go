@@ -216,6 +216,8 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	})
 
 	dynamicHandler := permissiveCORS(dynamicMux)
+	// validate origin middleware to prevent CSRF
+	dynamicHandler = validateSource(options.AppOrigin, renderer)(dynamicHandler)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {

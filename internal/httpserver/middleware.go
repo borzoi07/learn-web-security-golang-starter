@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +37,72 @@ func contentTypeOptions(next http.Handler) http.Handler {
 		next.ServeHTTP(responseWriter, request)
 	})
 }
+
+// prevents CSRF
+func validateSource(appOrigin string, renderer *templates.Renderer) middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodPost {
+				next.ServeHTTP(responseWriter, request)
+				return
+			}
+
+			clientOrigin := request.Header.Get("Origin")
+			if clientOrigin == "" {
+				refererUrl, err := url.Parse(request.Header.Get("Referer"))
+				if err != nil {
+					http.Error(responseWriter, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				parsedReferer := &url.URL{
+					Scheme: refererUrl.Scheme,
+					Host:   refererUrl.Host,
+				}
+
+				clientOrigin = parsedReferer.String()
+			}
+
+			if clientOrigin != appOrigin {
+				if err := httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "Invalid Origin", "the request came from an invalid/missing origin"); err != nil {
+					http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				}
+				return
+			}
+			next.ServeHTTP(responseWriter, request)
+		})
+	}
+}
+
+/* // validateSource solution files alternative //
+func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodPost {
+				next.ServeHTTP(responseWriter, request)
+				return
+			}
+
+			origin := request.Header.Get("Origin")
+			if origin == appOrigin {
+				next.ServeHTTP(responseWriter, request)
+				return
+			}
+			if origin == "" {
+				referer := request.Header.Get("Referer")
+				parsedReferer, err := url.Parse(referer)
+				if err == nil && referer != "" && parsedReferer.Scheme+"://"+parsedReferer.Host == appOrigin {
+					next.ServeHTTP(responseWriter, request)
+					return
+				}
+			}
+
+			if err := httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "Forbidden", "This request did not come from Bearly Secure."); err != nil {
+				http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		})
+	}
+}
+*/
 
 func permissiveCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
