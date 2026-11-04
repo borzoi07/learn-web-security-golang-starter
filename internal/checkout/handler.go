@@ -79,7 +79,7 @@ func (handler *Handler) Page(responseWriter http.ResponseWriter, request *http.R
 
 func (handler *Handler) Submit(responseWriter http.ResponseWriter, request *http.Request) {
 	current, ok := handler.requireAuth(responseWriter, request)
-	if !ok {
+	if !ok || !handler.verifyCSRF(responseWriter, request, current.Session.CSRFToken) {
 		return
 	}
 	items, err := handler.cartStore.ListItems(request.Context(), current.User.ID)
@@ -230,6 +230,20 @@ func (handler *Handler) requireAuth(responseWriter http.ResponseWriter, request 
 		return accounts.CurrentSession{}, false
 	}
 	return current, found
+}
+
+func (handler *Handler) verifyCSRF(responseWriter http.ResponseWriter, request *http.Request, expectedToken string) bool {
+	formCSRFToken, err := httpx.FormValue(request, "csrfToken")
+	if err != nil {
+		handler.errorPage(responseWriter, http.StatusBadRequest, "Invalid Request", "The submitted form is invalid.")
+		return false
+	}
+	if expectedToken == "" || !sessions.CSRFTokensMatch(expectedToken, formCSRFToken) {
+		handler.errorPage(responseWriter, http.StatusForbidden, "Forbidden", "Invalid request.")
+		return false
+	}
+
+	return true
 }
 
 func (handler *Handler) orderNotFound(responseWriter http.ResponseWriter) {
