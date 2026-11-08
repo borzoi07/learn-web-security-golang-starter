@@ -3,7 +3,6 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,6 +13,15 @@ type Logger struct {
 	mutex sync.Mutex
 	file  *os.File
 	now   func() time.Time
+}
+
+var sensitiveFields = map[string]struct{}{
+	"sessionId":   {},
+	"resetToken":  {},
+	"resetLink":   {},
+	"secret":      {},
+	"adminNotes":  {},
+	"storagePath": {},
 }
 
 func Open(filePath string) (*Logger, error) {
@@ -36,7 +44,14 @@ func (logger *Logger) Event(eventName string, fields map[string]any) error {
 		"timestamp": logger.now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		"event":     eventName,
 	}
-	maps.Copy(record, fields)
+	// maps.Copy(record, fields)
+	for name, v := range fields {
+		if _, ok := sensitiveFields[name]; ok {
+			record[name] = "[REDACTED]"
+			continue
+		}
+		record[name] = v
+	}
 
 	logger.mutex.Lock()
 	defer logger.mutex.Unlock()
