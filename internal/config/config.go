@@ -51,6 +51,10 @@ func LoadAttackerLab(workingDirectory string) (AttackerLabConfig, error) {
 }
 
 func Parse(environment map[string]string, workingDirectory string) (Config, error) {
+	pawpalApiKey, err := requireEnvironmentVariable(environment, "PAWPAL_API_KEY")
+	if err != nil {
+		return Config{}, err
+	}
 	port, err := parseNonNegativeInteger(valueOrDefault(environment, "PORT", strconv.Itoa(defaultPort)), "PORT")
 	if err != nil {
 		return Config{}, err
@@ -79,7 +83,7 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 	}
 
 	return Config{
-		PawPalAPIKey:               "bs_test_pawpal_starter_key",
+		PawPalAPIKey:               pawpalApiKey,
 		AppOrigin:                  appOrigin,
 		Port:                       port,
 		DatabasePath:               databasePath,
@@ -101,6 +105,14 @@ func ParseAttackerLab(environment map[string]string) (AttackerLabConfig, error) 
 		return AttackerLabConfig{}, errors.New("ATTACKER_LAB_PORT must be no greater than 65535")
 	}
 	return AttackerLabConfig{Port: port}, nil
+}
+
+func requireEnvironmentVariable(environment map[string]string, name string) (string, error) {
+	value := environment[name]
+	if value == "" {
+		return "", fmt.Errorf("missing required environment variable: %s", name)
+	}
+	return value, nil
 }
 
 func processEnvironment() map[string]string {
