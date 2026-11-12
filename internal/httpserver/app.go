@@ -50,6 +50,7 @@ type Options struct {
 	TemplateDirectory       string
 	PublicDirectory         string
 	DownloadSigningKey      [32]byte
+	TrustedProxyHops        int
 }
 
 type Application struct {
@@ -100,10 +101,6 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		logger,
 		unboundedPublicProductResults,
 	)
-	// var downloadSigningKey [32]byte
-	// if _, err := rand.Read(downloadSigningKey[:]); err != nil {
-	// 	return nil, fmt.Errorf("generate download signing key: %w", err)
-	// }
 	uploadHandler := uploads.NewHandler(
 		accountStore,
 		uploadStore,
