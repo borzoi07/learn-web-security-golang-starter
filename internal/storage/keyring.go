@@ -1,5 +1,3 @@
-//lint:file-ignore U1000 Some code in this file is used later
-
 package storage
 
 import (
@@ -62,11 +60,46 @@ func (keyring *Keyring) ActiveVersion() string {
 }
 
 func (keyring *Keyring) Encrypt(plaintext []byte) (string, error) {
-	return string(plaintext), nil
+	keyring, err := requireKeyring(keyring)
+	if err != nil {
+		return "", err
+	}
+	activeKey, ok := keyring.keys[keyring.ActiveVersion()]
+	if !ok {
+		return "", errors.New("missing active key")
+	}
+	encryptedPayload, err := Encrypt(plaintext, activeKey)
+	if err != nil {
+		return "", err
+	}
+
+	return serializeEncryptedPayload(versionedEncryptedPayload{
+		KeyVersion: keyring.ActiveVersion(),
+		Nonce:      encryptedPayload.Nonce,
+		AuthTag:    encryptedPayload.AuthTag,
+		Ciphertext: encryptedPayload.Ciphertext,
+	})
 }
 
 func (keyring *Keyring) Decrypt(serialized string) ([]byte, error) {
-	return []byte(serialized), nil
+	keyring, err := requireKeyring(keyring)
+	if err != nil {
+		return nil, err
+	}
+	encryptedPayload, err := deserializeEncryptedPayload(serialized)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := keyring.keys[encryptedPayload.KeyVersion]
+	if !ok {
+		return nil, errors.New("invalid key version")
+	}
+
+	return Decrypt(EncryptedPayload{
+		Nonce:      encryptedPayload.Nonce,
+		AuthTag:    encryptedPayload.AuthTag,
+		Ciphertext: encryptedPayload.Ciphertext,
+	}, key)
 }
 
 func requireKeyring(keyring *Keyring) (*Keyring, error) {
