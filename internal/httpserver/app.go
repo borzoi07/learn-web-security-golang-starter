@@ -214,8 +214,15 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	})
 
 	// dynamicHandler := permissiveCORS(dynamicMux) // removed the global CORS middleware
-	// validate origin middleware to prevent CSRF
-	dynamicHandler := validateSource(options.AppOrigin, renderer)(dynamicMux)
+	dynamicHandler := applyMiddleware(
+		dynamicMux,
+		fixedWindowRateLimiter(rateLimitOptions{
+			window:  time.Minute,
+			maximum: 100,
+			key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		}),
+		validateSource(options.AppOrigin, renderer),
+	)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {

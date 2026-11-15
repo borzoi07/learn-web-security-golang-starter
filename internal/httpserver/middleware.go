@@ -1,5 +1,3 @@
-//lint:file-ignore U1000 Some code in this file is used later
-
 package httpserver
 
 import (
@@ -86,37 +84,6 @@ func validateSource(appOrigin string, renderer *templates.Renderer) middleware {
 		})
 	}
 }
-
-/* // validateSource solution files alternative //
-func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-			if request.Method != http.MethodPost {
-				next.ServeHTTP(responseWriter, request)
-				return
-			}
-
-			origin := request.Header.Get("Origin")
-			if origin == appOrigin {
-				next.ServeHTTP(responseWriter, request)
-				return
-			}
-			if origin == "" {
-				referer := request.Header.Get("Referer")
-				parsedReferer, err := url.Parse(referer)
-				if err == nil && referer != "" && parsedReferer.Scheme+"://"+parsedReferer.Host == appOrigin {
-					next.ServeHTTP(responseWriter, request)
-					return
-				}
-			}
-
-			if err := httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "Forbidden", "This request did not come from Bearly Secure."); err != nil {
-				http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
-		})
-	}
-}
-*/
 
 func cspNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -270,8 +237,17 @@ func (limiter *fixedWindowLimiter) reject(responseWriter http.ResponseWriter, re
 
 func fixedWindowRateLimiter(options rateLimitOptions) middleware {
 	validateRateLimitOptions(options)
+	fixedWindowLimiter := newFixedWindowLimiter(options)
 	return func(next http.Handler) http.Handler {
-		return next
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			rateLimitState, limited := fixedWindowLimiter.consume(request)
+			if limited {
+				fixedWindowLimiter.reject(responseWriter, request, rateLimitState)
+				return
+			}
+			setRateLimitHeaders(responseWriter, rateLimitState)
+			next.ServeHTTP(responseWriter, request)
+		})
 	}
 }
 
