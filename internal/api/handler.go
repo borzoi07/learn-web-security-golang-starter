@@ -152,6 +152,18 @@ func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, requ
 	}
 	if apiKey.Scope != "orders:read" {
 		httpx.RespondWithJSON(responseWriter, http.StatusForbidden, map[string]string{"error": "API key scope is not allowed"})
+		return
+	}
+
+	quota, err := handler.apiStore.ConsumeQuota(request.Context(), apiKey.ID)
+	if err != nil {
+		handler.internalError(responseWriter, request, err)
+		return
+	}
+	SetQuotaHeaders(responseWriter, quota)
+	if !quota.Allowed {
+		RespondWithQuotaExhausted(responseWriter, quota)
+		return
 	}
 
 	orders, err := handler.orderStore.ListAll(request.Context())
@@ -168,6 +180,7 @@ func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, requ
 	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{
 		"integration": "Warehouse Fulfillment Integration",
 		"orders":      responses,
+		"quota":       ToQuotaResponse(quota),
 	})
 }
 
