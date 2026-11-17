@@ -118,11 +118,51 @@ func recoverPanics(logger *logging.Logger, renderer *templates.Renderer) middlew
 	}
 }
 
-func LoadShedder(_ int, _ int) func(http.Handler) http.Handler {
+func LoadShedder(concurrencyCap int, retryAfterSeconds int) func(http.Handler) http.Handler {
+	if concurrencyCap < 1 || retryAfterSeconds < 1 {
+		panic("non-positive argument in LoadShedder")
+	}
+	capacityTracker := make(chan struct{}, concurrencyCap)
 	return func(next http.Handler) http.Handler {
-		return next
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			responseWriter.Header().Set("X-In-Flight-Limit", strconv.Itoa(concurrencyCap))
+			select {
+			case capacityTracker <- struct{}{}:
+				defer func() { <-capacityTracker }()
+				next.ServeHTTP(responseWriter, request)
+			default:
+				responseWriter.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+				httpx.RespondWithJSON(responseWriter, http.StatusServiceUnavailable, map[string]string{"error": "Service is at capacity"})
+			}
+		})
 	}
 }
+
+/* THE FOLLOWING VERSION HAS A RACE CONDITION CALLED check-then-act (TOCTOU "time of check to time of use")
+
+if len(capacityTracker) == cap(capacityTracker) { // 1. check
+    ... // RespondWithError + Retry-After
+}
+capacityTracker <- struct{}{}                     // 2. act
+defer func() {
+	<-capacityTracker
+}()
+
+
+Under concurrent load each request runs in its own goroutine.
+Suppose 49 slots are full and two requests arrive together:
+
+1. Goroutine A checks: 49 < 50, so it continues.
+2. Goroutine B checks: 49 < 50, so it continues.
+3. A sends and takes the last slot.
+4. B sends to a full channel and blocks.
+
+B isn't rejected. It sits there waiting for a slot to open up.
+During a flood, many goroutines can pile up like this,
+which is the "blocking excess work" the assignment asks to avoid.
+The `select` with `default` closes that gap because no other goroutine can get in between the check and the send
+since it happens as one atomic step.
+*/
 
 func SearchThrottle(renderer *templates.Renderer) func(http.Handler) http.Handler {
 	return fixedWindowRateLimiter(rateLimitOptions{
