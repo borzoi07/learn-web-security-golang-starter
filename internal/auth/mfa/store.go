@@ -129,11 +129,10 @@ func verifyAt(code, secret string, timestamp time.Time) bool {
 }
 
 func (store *Store) VerifyAndConsume(ctx context.Context, userID int64, code, secret string) (bool, error) {
-	/* // moved logic to the return statement
-	if !verifyAt(code, secret, now) {
+	if !verifyAt(code, secret, store.now()) {
 		return false, nil
 	}
-	*/
+
 	const t0 = 0 // unix epoch offset
 	timeStep := (store.now().Unix() - t0) / totpPeriodSeconds
 
@@ -149,7 +148,7 @@ func (store *Store) VerifyAndConsume(ctx context.Context, userID int64, code, se
 		return false, fmt.Errorf("count consumed TOTP time steps: %w", err)
 	}
 
-	return verifyAt(code, secret, store.now()) && rowsAffected == 1, nil
+	return rowsAffected == 1, nil
 }
 
 func (store *Store) ConfirmEnrollment(ctx context.Context, userID int64) ([]string, error) {

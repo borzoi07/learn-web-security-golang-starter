@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -29,22 +30,24 @@ type authPage struct {
 }
 
 type authHandler struct {
-	accounts       *accounts.Store
-	renderer       *templates.Renderer
-	logger         *logging.Logger
-	mfa            *mfa.Store
-	passwordResets *passwordreset.Store
-	appOrigin      string
+	accounts         *accounts.Store
+	renderer         *templates.Renderer
+	logger           *logging.Logger
+	mfa              *mfa.Store
+	passwordResets   *passwordreset.Store
+	appOrigin        string
+	trustedProxyHops int
 }
 
-func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string) *authHandler {
+func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string, trustedProxyHops int) *authHandler {
 	return &authHandler{
-		accounts:       accountStore,
-		renderer:       renderer,
-		logger:         logger,
-		mfa:            mfaStore,
-		passwordResets: passwordResetStore,
-		appOrigin:      appOrigin,
+		accounts:         accountStore,
+		renderer:         renderer,
+		logger:           logger,
+		mfa:              mfaStore,
+		passwordResets:   passwordResetStore,
+		appOrigin:        appOrigin,
+		trustedProxyHops: trustedProxyHops,
 	}
 }
 
@@ -311,8 +314,18 @@ func (handler *authHandler) internalError(responseWriter http.ResponseWriter, re
 	}
 }
 
-func (handler *authHandler) logAuthenticationEvent(_ *http.Request, eventName string, fields map[string]any) {
-	_ = handler.logger.Event(eventName, fields)
+func (handler *authHandler) logAuthenticationEvent(request *http.Request, eventName string, fields map[string]any) {
+	newFields := make(map[string]any, len(fields)+4)
+	maps.Copy(newFields, fields)
+
+	newFields["requestId"] = httpx.GetCtxUUID(request.Context()).String()
+	newFields["sourceIp"] = clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request)
+	newFields["userId"] = fields["userId"] // if fields doesn't have userId returns nil because of interface type
+	newFields["outcome"] = "failure"
+	if success, _ := fields["success"].(bool); success { // doesn't panic because of second `, _` value.
+		newFields["outcome"] = "success"
+	}
+	_ = handler.logger.Event(eventName, newFields)
 }
 
 func safeReturnTo(value string) string {

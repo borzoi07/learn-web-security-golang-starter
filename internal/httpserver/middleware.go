@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
@@ -116,6 +117,16 @@ func recoverPanics(logger *logging.Logger, renderer *templates.Renderer) middlew
 			next.ServeHTTP(responseWriter, request)
 		})
 	}
+}
+
+func assignUUID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		requestUUID := uuid.NewV4()
+		responseWriter.Header().Set("X-Request-ID", requestUUID.String())
+		request = request.Clone(httpx.WithUUID(request.Context(), requestUUID))
+
+		next.ServeHTTP(responseWriter, request)
+	})
 }
 
 func LoadShedder(concurrencyCap int, retryAfterSeconds int) func(http.Handler) http.Handler {
