@@ -139,6 +139,13 @@ func (handler *authHandler) TOTPLogin(responseWriter http.ResponseWriter, reques
 			"failureReason": "totp code mismatch",
 			"returnTo":      challenge.ReturnTo,
 		})
+
+		handler.loginAuthAlertCounter.Record(
+			httpx.GetCtxUUID(request.Context()),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			user.ID,
+		)
+
 		if exhausted {
 			clearTOTPLoginChallengeCookie(responseWriter)
 			http.Redirect(responseWriter, request, verificationRestartLoginPath(challenge.ReturnTo), http.StatusFound)
@@ -304,6 +311,14 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 			"success":       false,
 			"failureReason": "email not found",
 		})
+
+		// count when the email is not valid too
+		handler.pwResetAuthAlertCounter.Record(
+			httpx.GetCtxUUID(request.Context()),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			nil,
+		)
+
 		// if err := handler.renderPasswordResetRequest(responseWriter, http.StatusNotFound, false, "No account exists for that email.", ""); err != nil {
 		if err := handler.renderPasswordResetRequest(responseWriter, http.StatusOK, true, "", ""); err != nil {
 			handler.internalError(responseWriter, request, err)
@@ -327,6 +342,12 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 		"resetToken": resetToken.Value,
 		"resetLink":  resetLink,
 	})
+	handler.pwResetAuthAlertCounter.Record(
+		httpx.GetCtxUUID(request.Context()),
+		clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+		user.ID,
+	)
+
 	// removed showing reset link in the known-account confirmation page
 	if err := handler.renderPasswordResetRequest(responseWriter, http.StatusOK, true, "", ""); err != nil {
 		handler.internalError(responseWriter, request, err)

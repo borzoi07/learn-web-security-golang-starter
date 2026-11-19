@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bootdotdev/learn-web-security/internal/accounts"
@@ -16,6 +17,7 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/botdetection"
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
+	"github.com/bootdotdev/learn-web-security/internal/observability"
 	"github.com/bootdotdev/learn-web-security/internal/templates"
 )
 
@@ -30,22 +32,36 @@ type authPage struct {
 }
 
 type authHandler struct {
-	accounts         *accounts.Store
-	renderer         *templates.Renderer
-	logger           *logging.Logger
-	mfa              *mfa.Store
-	passwordResets   *passwordreset.Store
-	appOrigin        string
-	trustedProxyHops int
+	accounts                *accounts.Store
+	renderer                *templates.Renderer
+	logger                  *logging.Logger
+	mfa                     *mfa.Store
+	passwordResets          *passwordreset.Store
+	loginAuthAlertCounter   *observability.AuthAlertThreshold
+	pwResetAuthAlertCounter *observability.AuthAlertThreshold
+	appOrigin               string
+	trustedProxyHops        int
 }
 
 func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string, trustedProxyHops int) *authHandler {
 	return &authHandler{
-		accounts:         accountStore,
-		renderer:         renderer,
-		logger:           logger,
-		mfa:              mfaStore,
-		passwordResets:   passwordResetStore,
+		accounts:       accountStore,
+		renderer:       renderer,
+		logger:         logger,
+		mfa:            mfaStore,
+		passwordResets: passwordResetStore,
+		loginAuthAlertCounter: observability.NewAuthAlertThreshold(
+			"failed_logins", // signal
+			3,               // attempts threshold
+			time.Minute*5,   // window
+			logger,
+		),
+		pwResetAuthAlertCounter: observability.NewAuthAlertThreshold(
+			"password_reset_requests", // signal
+			3,                         // attempts threshold
+			time.Minute*10,            // window
+			logger,
+		),
 		appOrigin:        appOrigin,
 		trustedProxyHops: trustedProxyHops,
 	}
@@ -87,12 +103,20 @@ func (handler *authHandler) Login(responseWriter http.ResponseWriter, request *h
 		return
 	}
 	if !found || !passwords.Verify(password, user.PasswordHash) {
+		userID := nullableInt64(user.ID, found)
 		handler.logAuthenticationEvent(request, "login_attempt", map[string]any{
 			"email":         email,
 			"success":       false,
 			"failureReason": loginFailureReason(found),
 			"returnTo":      returnTo,
 		})
+
+		handler.loginAuthAlertCounter.Record(
+			httpx.GetCtxUUID(request.Context()),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			userID,
+		)
+
 		if err := handler.renderLogin(responseWriter, http.StatusUnauthorized, "Invalid email or password", returnTo); err != nil {
 			handler.internalError(responseWriter, request, err)
 		}
